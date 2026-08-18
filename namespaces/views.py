@@ -7,7 +7,7 @@ from clusters.models import Cluster
 from .models import Namespace
 from .serializers import NamespaceSerializer
 from .k8s_client import get_core_v1_api
-
+from django.db import transaction
 
 class NamespaceListCreateView(APIView):
     def get(self, request):
@@ -54,19 +54,60 @@ class NamespaceListCreateView(APIView):
 class NamespaceDeleteView(APIView):
     def delete(self, request, pk):
         try:
-            namespace = Namespace.objects.get(id=pk)
+            with transaction.atomic():
+
+                # Lock this database row so another DELETE request
+                # cannot modify/delete it at the same time.
+                namespace = (
+                    Namespace.objects
+                    .select_for_update()
+                    .get(id=pk)
+                )
+
+                cluster = namespace.cluster
+
+                api = get_core_v1_api(cluster)
+
+                try:
+                    api.delete_namespace(namespace.name)
+
+                except ApiException as e:
+
+                    # Namespace is already gone from Kubernetes.
+                    # We can safely remove the database record.
+                    if e.status == 404:
+                        namespace.delete()
+
+                        return Response(
+                            status=status.HTTP_204_NO_CONTENT
+                        )
+
+                    return Response(
+                        {
+                            "error": "Kubernetes error",
+                            "detail": str(e)
+                        },
+                        status=status.HTTP_502_BAD_GATEWAY
+                    )
+
+                except Exception as e:
+                    return Response(
+                        {
+                            "error": "Cannot reach Kubernetes cluster",
+                            "detail": str(e)
+                        },
+                        status=status.HTTP_502_BAD_GATEWAY
+                    )
+
+                # Kubernetes deletion succeeded.
+                namespace.delete()
+
+                return Response(
+                    status=status.HTTP_204_NO_CONTENT
+                )
+
         except Namespace.DoesNotExist:
-            return Response({"error": "Namespace not found"}, status=status.HTTP_404_NOT_FOUND)
-
-        cluster = namespace.cluster
-        api = get_core_v1_api(cluster)
-        try:
-            api.delete_namespace(namespace.name)
-        except ApiException as e:
-            if e.status != 404:
-                return Response({"error": "Kubernetes error", "detail": str(e)}, status=status.HTTP_502_BAD_GATEWAY)
-        except Exception as e:
-            return Response({"error": "Cannot reach Kubernetes cluster", "detail": str(e)}, status=status.HTTP_502_BAD_GATEWAY)
-
-        namespace.delete()
-        return Response(status=status.HTTP_204_NO_CONTENT)
+            return Response(
+                {"error": "Namespace not found"},
+                status=status.HTTP_404_NOT_FOUND
+            )
