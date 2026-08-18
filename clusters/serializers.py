@@ -5,5 +5,5 @@ from .models import Cluster
 class ClusterSerializer(serializers.ModelSerializer):
     class Meta:
         model = Cluster
-        fields = ['id', 'name', 'address', 'token', 'extra', 'created_at']
+        fields = ['id', 'address', 'name', 'token']
         extra_kwargs = {'token': {'write_only': True}}
