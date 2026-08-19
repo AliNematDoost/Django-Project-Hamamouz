@@ -1,2 +1,3 @@
 kubernetes
 redis
+celery

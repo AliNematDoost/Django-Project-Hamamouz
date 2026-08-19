@@ -1,28 +1,19 @@
-import json
-
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 
-from .redis_client import redis_client
+from .tasks import print_test_task
 
 
 class TestTaskView(APIView):
 
     def post(self, request):
-        task = {
-            "type": "print",
-            "message": "Hello from background worker!"
-        }
-
-        redis_client.rpush(
-            "task_queue",
-            json.dumps(task)
-        )
+        task = print_test_task.delay()
 
         return Response(
             {
-                "message": "Task queued successfully"
+                "message": "Task queued successfully",
+                "task_id": task.id,
             },
             status=status.HTTP_202_ACCEPTED
         )
