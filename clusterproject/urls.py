@@ -22,4 +22,5 @@ urlpatterns = [
     path('api/', include('clusters.urls')),
     path('api/', include('namespaces.urls')),
     path('api/', include('applications.urls')),
+    path('api/', include('backup.urls')),
 ]

@@ -41,6 +41,7 @@ INSTALLED_APPS = [
     'clusters',
     'namespaces',
     'applications',
+    'backup',
 ]
 
 MIDDLEWARE = [

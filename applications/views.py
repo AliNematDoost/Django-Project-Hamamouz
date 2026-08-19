@@ -132,70 +132,70 @@ class AppDetailView(APIView):
 		return Response(AppSerializer(app).data)
 
 	def delete(self, request, pk):
-    try:
-        with transaction.atomic():
+		try:
+			with transaction.atomic():
 
-            # Lock this App row so concurrent DELETE requests
-            # cannot process the same App at the same time.
-            app = (
-                App.objects
-                .select_related('namespace', 'namespace__cluster')
-                .select_for_update()
-                .get(id=pk)
-            )
+				# Lock this App row so concurrent DELETE requests
+				# cannot process the same App at the same time.
+				app = (
+					App.objects
+					.select_related('namespace', 'namespace__cluster')
+					.select_for_update()
+					.get(id=pk)
+				)
 
-            apps_api = get_apps_v1_api(app.namespace.cluster)
+				apps_api = get_apps_v1_api(app.namespace.cluster)
 
-            try:
-                apps_api.delete_namespaced_deployment(
-                    app.name,
-                    app.namespace.name,
-                    _request_timeout=5
-                )
+				try:
+					apps_api.delete_namespaced_deployment(
+						app.name,
+						app.namespace.name,
+						_request_timeout=5
+					)
 
-            except ApiException as e:
-                if e.status == 404:
-                    # Deployment is already gone from Kubernetes.
-                    # We can safely remove the DB record.
-                    app.delete()
+				except ApiException as e:
+					if e.status == 404:
+						# Deployment is already gone from Kubernetes.
+						# We can safely remove the DB record.
+						app.delete()
 
-                    return Response(
-                        status=status.HTTP_204_NO_CONTENT
-                    )
+						return Response(
+							status=status.HTTP_204_NO_CONTENT
+						)
 
-                elif e.status in (401, 403):
-                    return Response(
-                        {"error": "Not authorized to delete deployment"},
-                        status=e.status
-                    )
+					elif e.status in (401, 403):
+						return Response(
+							{"error": "Not authorized to delete deployment"},
+							status=e.status
+						)
 
-                else:
-                    return Response(
-                        {
-                            "error": "Kubernetes error",
-                            "detail": str(e)
-                        },
-                        status=status.HTTP_502_BAD_GATEWAY
-                    )
+					else:
+						return Response(
+							{
+								"error": "Kubernetes error",
+								"detail": str(e)
+							},
+							status=status.HTTP_502_BAD_GATEWAY
+						)
 
-            except Exception as e:
-                return Response(
-                    {
-                        "error": "Cannot reach Kubernetes cluster",
-                        "detail": str(e)
-                    },
-                    status=status.HTTP_502_BAD_GATEWAY
-                )
+				except Exception as e:
+					return Response(
+						{
+							"error": "Cannot reach Kubernetes cluster",
+							"detail": str(e)
+						},
+						status=status.HTTP_502_BAD_GATEWAY
+					)
 
-            # Kubernetes deletion succeeded.
-            app.delete()
+				# Kubernetes deletion succeeded.
+				app.delete()
 
-            return Response(
-                status=status.HTTP_204_NO_CONTENT
-            )
+				return Response(
+					status=status.HTTP_204_NO_CONTENT
+				)
 
-    except App.DoesNotExist:
-        return Response(
-            {"error": "App not found"},
-            status=status.HTTP_404_NOT_FOUND
-        )
+		except App.DoesNotExist:
+			return Response(
+				{"error": "App not found"},
+				status=status.HTTP_404_NOT_FOUND
+			)
