@@ -7,6 +7,7 @@ from kubernetes.client.rest import ApiException
 from applications.models import App
 from clusters.k8s_client import get_core_v1_api
 from .models import Backup
+from kubernetes.stream import stream
 
 
 @shared_task(
@@ -60,10 +61,11 @@ def perform_backup(self, backup_id):
         # We still need to stream/copy the generated archive
         # from the pod to the worker filesystem.
 
-        result = core_api.connect_get_namespaced_pod_exec(
+        result = stream(
+            core_api.connect_get_namespaced_pod_exec,
             backup.pod_name,
             app.namespace.name,
-            command=command,
+            command=["tar", "czf", "-", backup.source_path],
             stderr=True,
             stdin=False,
             stdout=True,
