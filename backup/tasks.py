@@ -102,12 +102,14 @@ def perform_backup(self, backup_id):
         backup.output_path = str(output_path)
         backup.status = "completed"
         backup.completed_at = datetime.now(timezone.utc)
+        backup.error = "No error"
 
         backup.save(
             update_fields=[
                 "output_path",
                 "status",
                 "completed_at",
+                "error"
             ]
         )
 
