@@ -61,16 +61,24 @@ def perform_backup(self, backup_id):
         # We still need to stream/copy the generated archive
         # from the pod to the worker filesystem.
 
-        result = stream(
+        resp = stream(
             core_api.connect_get_namespaced_pod_exec,
             backup.pod_name,
             app.namespace.name,
             command=["tar", "czf", "-", backup.source_path],
-            stderr=True,
-            stdin=False,
-            stdout=True,
-            tty=False,
+            stderr=True, stdin=False, stdout=True, tty=False,
+            _preload_content=False,
         )
+
+        while resp.is_open():
+            resp.update(timeout=1)
+            if resp.peek_stderr():
+                err = resp.read_stderr()
+
+        resp.close()
+
+        with open(output_path, "wb") as f:
+            f.write(resp.read_all().encode('utf-8', errors='surrogateescape'))
 
         # `result` needs to be handled according to your Kubernetes
         # client execution/streaming method in your installed client.
