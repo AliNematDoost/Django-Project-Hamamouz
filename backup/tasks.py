@@ -1,10 +1,9 @@
-from datetime import datetime, timezone
+from datetime import timedelta, timezone, datetime
 from pathlib import Path
 import base64
-
+from django.db import transaction
 from celery import shared_task
 from kubernetes.stream import stream
-
 from clusters.k8s_client import get_core_v1_api
 from .models import Backup
 
@@ -14,6 +13,8 @@ from .models import Backup
     autoretry_for=(Exception,),
     retry_backoff=True,
     retry_kwargs={"max_retries": 3},
+    soft_time_limit=3600,
+    time_limit=3660,
 )
 def perform_backup(self, backup_id):
     backup = Backup.objects.get(id=backup_id)
@@ -115,3 +116,34 @@ def perform_backup(self, backup_id):
         backup.error = str(exc)
         backup.save(update_fields=["status", "error"])
         raise
+
+
+    @shared_task
+    def fail_stale_pending_backups():
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+
+        stale_backups = Backup.objects.filter(
+            status="pending",
+            created_at__lt=cutoff,
+        )
+
+        count = 0
+
+        for backup in stale_backups.iterator():
+            with transaction.atomic():
+                backup = Backup.objects.select_for_update().get(pk=backup.pk)
+
+                # It may have been processed while this task was running.
+                if backup.status != "pending":
+                    continue
+
+                backup.status = "failed"
+                backup.error = (
+                    "Backup remained pending for more than 24 hours. "
+                    "The Celery worker or queue may have been unavailable."
+                )
+                backup.save(update_fields=["status", "error"])
+
+                count += 1
+
+        return count

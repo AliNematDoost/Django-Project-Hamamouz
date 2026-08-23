@@ -70,3 +70,26 @@ class BackupStatusView(APIView):
             serializer.data,
             status=status.HTTP_200_OK,
         )
+
+class AppBackupListView(APIView):
+
+    def get(self, request, app_id):
+        if not App.objects.filter(id=app_id).exists():
+            return Response(
+                {"error": "App not found"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        backups = Backup.objects.filter(
+            app_id=app_id
+        ).order_by("-created_at")
+
+        serializer = BackupSerializer(
+            backups,
+            many=True,
+        )
+
+        return Response(
+            serializer.data,
+            status=status.HTTP_200_OK,
+        )
