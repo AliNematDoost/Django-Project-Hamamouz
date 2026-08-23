@@ -135,4 +135,8 @@ CELERY_BEAT_SCHEDULE = {
         "task": "backup.tasks.fail_stale_pending_backups",
         "schedule": crontab(minute=0),
     },
+    "scheduled-backup": {
+        "task": "backup.tasks.process_scheduled_backups",
+        "schedule": crontab(minute="*")
+    }
 }

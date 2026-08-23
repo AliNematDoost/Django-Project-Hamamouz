@@ -120,32 +120,64 @@ def perform_backup(self, backup_id):
         raise
 
 
-    @shared_task
-    def fail_stale_pending_backups():
-        cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+@shared_task
+def fail_stale_pending_backups():
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
 
-        stale_backups = Backup.objects.filter(
+    stale_backups = Backup.objects.filter(
+        status="pending",
+        created_at__lt=cutoff,
+    )
+
+    count = 0
+
+    for backup in stale_backups.iterator():
+        with transaction.atomic():
+            backup = Backup.objects.select_for_update().get(pk=backup.pk)
+
+            # It may have been processed while this task was running.
+            if backup.status != "pending":
+                continue
+
+            backup.status = "failed"
+            backup.error = (
+                "Backup remained pending for more than 24 hours. "
+                "The Celery worker or queue may have been unavailable."
+            )
+            backup.save(update_fields=["status", "error"])
+
+            count += 1
+
+    return count
+
+@shared_task
+def process_scheduled_backups():
+    now = datetime.now(timezone.utc).replace(
+        second=0,
+        microsecond=0,
+    )
+
+    schedules = ScheduleBackup.objects.filter(
+        active=True
+    )
+
+    for schedule in schedules:
+
+        if not croniter.match(
+            schedule.schedule,
+            now,
+        ):
+            continue
+
+        backup = Backup.objects.create(
+            app=schedule.app,
+            pod_name=schedule.pod_name,
+            source_path=schedule.source_path,
             status="pending",
-            created_at__lt=cutoff,
+            created_at=now,
+            is_scheduled=True,
         )
 
-        count = 0
-
-        for backup in stale_backups.iterator():
-            with transaction.atomic():
-                backup = Backup.objects.select_for_update().get(pk=backup.pk)
-
-                # It may have been processed while this task was running.
-                if backup.status != "pending":
-                    continue
-
-                backup.status = "failed"
-                backup.error = (
-                    "Backup remained pending for more than 24 hours. "
-                    "The Celery worker or queue may have been unavailable."
-                )
-                backup.save(update_fields=["status", "error"])
-
-                count += 1
-
-        return count
+        perform_backup.delay(
+            str(backup.id)
+        )

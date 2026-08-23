@@ -15,12 +15,11 @@ class BackupView(APIView):
         app_id = request.data.get("app_id")
         source_path = request.data.get("source_path")
         pod_name = request.data.get("pod_name")
+        schedule = request.data.get("schedule")
 
-        if not app_id or not source_path or not pod_name:
+        if not app_id or not source_path:
             return Response(
-                {
-                    "error": "app_id, pod_name and source_path are required"
-                },
+                {"error": "app_id and source_path are required"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -35,11 +34,64 @@ class BackupView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
+        # Scheduled backup
+        if schedule:
+            if not pod_name:
+                return Response(
+                    {"error": "pod_name is required for scheduled backup"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            
+            already_exists = ScheduleBackup.objects.filter(
+                app=app,
+                pod_name=pod_name,
+                source_path=source_path,
+                schedule=schedule,
+                active=True,
+            ).exists()
+
+            if already_exists:
+                return Response(
+                    {
+                        "error": (
+                            "An active scheduled backup with the same "
+                            "app, pod, source path and schedule already exists"
+                        )
+                    },
+                    status=status.HTTP_409_CONFLICT,
+                )
+
+            scheduled_backup = ScheduleBackup.objects.create(
+                app=app,
+                pod_name=pod_name,
+                source_path=source_path,
+                schedule=schedule,
+                active=True,
+            )
+
+            return Response(
+                {
+                    "schedule_backup_id": str(scheduled_backup.id),
+                    "status": "scheduled",
+                    "created_at": scheduled_backup.created_at,
+                    "active": scheduled_backup.active,
+                },
+                status=status.HTTP_201_CREATED,
+            )
+
+        # Instant backup
+        if not pod_name:
+            return Response(
+                {"error": "pod_name is required for instant backup"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         backup = Backup.objects.create(
             app=app,
             pod_name=pod_name,
             source_path=source_path,
             status="pending",
+            is_scheduled=False,
         )
 
         perform_backup.delay(str(backup.id))
