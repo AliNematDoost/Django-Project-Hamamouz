@@ -11,10 +11,7 @@ class BackupSerializer(serializers.ModelSerializer):
         fields = [
             "backup_id",
             "status",
-            "output_path",
-            "error",
-            "created_at",
-            "completed_at",
+            "pod_name"
         ]
 
     def get_backup_id(self, obj):

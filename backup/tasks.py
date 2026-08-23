@@ -1,13 +1,12 @@
 from datetime import datetime, timezone
 from pathlib import Path
+import base64
 
 from celery import shared_task
-from kubernetes.client.rest import ApiException
+from kubernetes.stream import stream
 
-from applications.models import App
 from clusters.k8s_client import get_core_v1_api
 from .models import Backup
-from kubernetes.stream import stream
 
 
 @shared_task(
@@ -28,7 +27,7 @@ def perform_backup(self, backup_id):
 
         core_api = get_core_v1_api(cluster)
 
-        # Make sure the requested pod really belongs to this App.
+        # Verify that the pod belongs to the application.
         pods = core_api.list_namespaced_pod(
             app.namespace.name,
             label_selector=f"app={app.name}",
@@ -40,53 +39,69 @@ def perform_backup(self, backup_id):
         if backup.pod_name not in pod_names:
             raise ValueError("Requested pod does not belong to this App")
 
+        # Destination on the Celery worker.
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         backup_dir = Path("/backups") / str(app.id) / today
         backup_dir.mkdir(parents=True, exist_ok=True)
 
         output_path = backup_dir / f"bkp_{backup.id}.tar.gz"
 
-        # Execute tar inside the selected pod.
+        # Create the tar.gz inside the pod and encode it as base64.
+        # base64 makes it safe to transfer through the Kubernetes exec
+        # text stream without corrupting binary tar.gz data.
         command = [
-            "tar",
-            "czf",
-            str(output_path),
-            backup.source_path,
+            "sh",
+            "-c",
+            f"tar -czf - {backup.source_path} | base64 -w 0",
         ]
-
-        # NOTE:
-        # This is the conceptual execution step.
-        # The output path is inside the pod, not the worker.
-        #
-        # We still need to stream/copy the generated archive
-        # from the pod to the worker filesystem.
 
         resp = stream(
             core_api.connect_get_namespaced_pod_exec,
             backup.pod_name,
             app.namespace.name,
-            command=["tar", "czf", "-", backup.source_path],
-            stderr=True, stdin=False, stdout=True, tty=False,
+            command=command,
+            stderr=True,
+            stdin=False,
+            stdout=True,
+            tty=False,
             _preload_content=False,
         )
 
+        stdout_data = []
+        stderr_data = []
+
         while resp.is_open():
             resp.update(timeout=1)
+
+            if resp.peek_stdout():
+                stdout_data.append(resp.read_stdout())
+
             if resp.peek_stderr():
-                err = resp.read_stderr()
+                stderr_data.append(resp.read_stderr())
 
         resp.close()
 
-        with open(output_path, "wb") as f:
-            f.write(resp.read_all().encode('utf-8', errors='surrogateescape'))
+        encoded_archive = "".join(stdout_data)
+        stderr_output = "".join(stderr_data)
 
-        # `result` needs to be handled according to your Kubernetes
-        # client execution/streaming method in your installed client.
-        # The next step below will copy the archive to the worker.
+        if not encoded_archive:
+            raise RuntimeError(
+                f"Backup command returned no data. tar stderr: {stderr_output}"
+            )
+
+        archive_data = base64.b64decode(encoded_archive)
+
+        with open(output_path, "wb") as f:
+            f.write(archive_data)
+
+        # Verify that the generated file is actually a gzip archive.
+        if archive_data[:2] != b"\x1f\x8b":
+            raise RuntimeError("Generated backup is not a valid gzip archive")
 
         backup.output_path = str(output_path)
         backup.status = "completed"
         backup.completed_at = datetime.now(timezone.utc)
+
         backup.save(
             update_fields=[
                 "output_path",
