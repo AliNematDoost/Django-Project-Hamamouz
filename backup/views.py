@@ -6,7 +6,7 @@ from applications.models import App
 
 from .models import Backup, ScheduleBackup
 from .tasks import perform_backup
-from .serializers import BackupSerializer
+from .serializers import BackupSerializer, ScheduleBackupSerializer
 
 
 class BackupView(APIView):
@@ -138,6 +138,64 @@ class AppBackupListView(APIView):
 
         serializer = BackupSerializer(
             backups,
+            many=True,
+        )
+
+        return Response(
+            serializer.data,
+            status=status.HTTP_200_OK,
+        )
+
+class ScheduleBackupDeactivateView(APIView):
+
+    def patch(self, request, schedule_id):
+        try:
+            scheduled_backup = ScheduleBackup.objects.get(
+                id=schedule_id
+            )
+        except ScheduleBackup.DoesNotExist:
+            return Response(
+                {"error": "Scheduled backup not found"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if not scheduled_backup.active:
+            return Response(
+                {
+                    "schedule_backup_id": str(scheduled_backup.id),
+                    "status": "already_deactivated",
+                    "active": False,
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        scheduled_backup.active = False
+        scheduled_backup.save(update_fields=["active"])
+
+        return Response(
+            {
+                "schedule_backup_id": str(scheduled_backup.id),
+                "status": "deactivated",
+                "active": False,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+class AppScheduleBackupListView(APIView):
+
+    def get(self, request, app_id):
+        if not App.objects.filter(id=app_id).exists():
+            return Response(
+                {"error": "App not found"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        schedules = ScheduleBackup.objects.filter(
+            app_id=app_id
+        ).order_by("-created_at")
+
+        serializer = ScheduleBackupSerializer(
+            schedules,
             many=True,
         )
 
