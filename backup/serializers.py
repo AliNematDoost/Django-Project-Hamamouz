@@ -13,6 +13,7 @@ class BackupSerializer(serializers.ModelSerializer):
             "status",
             "pod_name",
             "error",
+            "output_path",
             "is_scheduled"
         ]
 
