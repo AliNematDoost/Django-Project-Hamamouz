@@ -4,7 +4,7 @@ from rest_framework import status
 
 from applications.models import App
 
-from .models import Backup
+from .models import Backup, ScheduleBackup
 from .tasks import perform_backup
 from .serializers import BackupSerializer
 

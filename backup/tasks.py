@@ -5,7 +5,8 @@ from django.db import transaction
 from celery import shared_task
 from kubernetes.stream import stream
 from clusters.k8s_client import get_core_v1_api
-from .models import Backup
+from .models import Backup, ScheduleBackup
+from croniter import croniter
 
 
 @shared_task(

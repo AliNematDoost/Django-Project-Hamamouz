@@ -11,35 +11,80 @@ from namespaces.validators import validate_k8s_name
 from .k8s_deployment import build_deployment_body, get_pod_statuses
 from .models import App
 from .serializers import AppSerializer
+from django.core.cache import cache
 
 
 class AppListCreateView(APIView):
 	def get(self, request):
-		namespace_id = request.query_params.get('namespace_id')
+		namespace_id = request.query_params.get("namespace_id")
+
 		if not namespace_id:
-			return Response({"error": "namespace_id is required"}, status=status.HTTP_400_BAD_REQUEST)
+			return Response(
+				{"error": "namespace_id is required"},
+				status=status.HTTP_400_BAD_REQUEST,
+			)
+
 		if not str(namespace_id).isdigit():
-			return Response({"error": "namespace_id must be an integer"}, status=status.HTTP_400_BAD_REQUEST)
+			return Response(
+				{"error": "namespace_id must be an integer"},
+				status=status.HTTP_400_BAD_REQUEST,
+			)
 
 		try:
-			namespace = Namespace.objects.select_related('cluster').get(id=namespace_id)
+			namespace = Namespace.objects.select_related(
+				"cluster"
+			).get(id=namespace_id)
 		except Namespace.DoesNotExist:
-			return Response({"error": "Namespace not found"}, status=status.HTTP_404_NOT_FOUND)
+			return Response(
+				{"error": "Namespace not found"},
+				status=status.HTTP_404_NOT_FOUND,
+			)
 
 		apps = App.objects.filter(namespace=namespace)
 		core_api = get_core_v1_api(namespace.cluster)
 
 		result = []
+
 		for app in apps:
-			data = AppSerializer(app).data
+			cache_key = f"app_status:{app.id}"
+
+			cached_status = cache.get(cache_key)
+
+			if cached_status is not None:
+				data = AppSerializer(app).data
+				data.update(cached_status)
+				result.append(data)
+				continue
+
 			try:
-				pods = get_pod_statuses(core_api, namespace.name, app.name)
-				overall_ready = len(pods) == app.replicas and all(p["ready"] for p in pods)
+				pods = get_pod_statuses(
+					core_api,
+					namespace.name,
+					app.name,
+				)
+
+				overall_ready = (
+					len(pods) == app.replicas
+					and all(p["ready"] for p in pods)
+				)
+
 			except Exception:
 				pods = []
 				overall_ready = False
-			data["ready"] = overall_ready
-			data["pods"] = pods
+
+			live_status = {
+				"ready": overall_ready,
+				"pods": pods,
+			}
+
+			cache.set(
+				cache_key,
+				live_status,
+				timeout=60,
+			)
+
+			data = AppSerializer(app).data
+			data.update(live_status)
 			result.append(data)
 
 		return Response(result)
