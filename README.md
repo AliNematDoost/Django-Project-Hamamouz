@@ -67,3 +67,40 @@ Because the Kubernetes exec stream is not suitable for transporting raw binary d
 
 Finally, the task updates the database record with the backup path, completion status, and completion time. If an exception occurs, the backup is marked as failed and the exception is propagated so Celery's retry mechanism can handle it.
 
+
+
+## Handling Backups Stuck in pending
+
+A background Celery Beat task checks for backups that have remained in pending status for more than 24 hours. The check runs periodically and identifies backups whose created_at is older than the 24-hour threshold.
+
+When such a backup is found, it is marked as failed and an error message is stored explaining that the task may have been affected by an unavailable worker or a stuck Celery queue.
+
+## Scheduled Backups
+
+Scheduled backups are separated from individual backup executions using two database models:
+
+`ScheduleBackup` stores the recurring backup definition, including the application, pod, source path, backup due time, creation time, and active state.
+
+`Backup` represents one actual backup execution and has its own ID, status, creation time, and is_scheduled flag.
+
+The same POST /backup endpoint is used for both immediate and scheduled backups. When a schedule value is included, a ScheduleBackup record is created. **The API prevents duplicate active schedules with the same application, pod, source path, and Due time.**
+
+Celery Beat runs the scheduled-backup task every minute. The task checks active ScheduleBackup records and uses their cron expressions to determine which schedules are due. For every matching schedule, it creates a new Backup record with is_scheduled=True and submits its ID to Celery.
+
+The Celery worker then executes the normal perform_backup task, so scheduled and immediate backups use the same backup execution mechanism.
+
+Each scheduled execution therefore receives a separate backup_id, appears in the application's backup list, and can be monitored through the normal backup status endpoint. A schedule can be deactivated by setting its active field to False; the record remains in the database but is no longer processed by the scheduler.
+
+## Redis Cache for App Status
+
+Redis is also used as a short-lived cache for the live status of each application.
+
+When the App API requests application information, the backend first checks Redis using an App-specific cache key. If the status is available, the cached result is returned without querying Kubernetes.
+
+On a cache miss, the backend queries Kubernetes for the application's Pods and calculates the current status, including whether the desired replicas are ready and the readiness of individual Pods. This live status is then stored in Redis with a TTL of 60 seconds.
+
+After 60 seconds, the cache expires automatically, and the next request queries Kubernetes again and refreshes the cache.
+
+Only live Kubernetes status is cached. The application's database data and Backup data are not stored in this cache.
+
+Redis is separated into different logical databases: one for the Celery broker, one for Celery results, and one for application status caching.
