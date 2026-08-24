@@ -68,60 +68,36 @@ We may need scheduled backup for a while and do not need it anymore, so I create
 
 ### Request Execution Flow with Celery and Redis
 
-**The backup API is implemented as an asynchronous task so that the HTTP request does not wait for the potentially time-consuming backup operation to finish.**
+A `POST /backup` request without `schedule` creates a `Backup` record with `pending` status and submits `perform_backup` to Celery. Celery places the task in Redis, and a Celery worker consumes and executes it. The API immediately returns `202 Accepted`.
 
-When a POST request is sent to the backup endpoint, the backend validates the requested application, pod, and source path, creates a Backup database record with pending status, and submits the backup task using perform_backup.delay(...). The API immediately returns 202 Accepted with the backup ID and current status.
+The backup status changes from `pending` -> `running` -> `completed` or `failed`. The output path and execution details are stored in the database.
 
-The task is then handled by Celery. The Celery application is configured to use Redis as its broker, so the task message is placed into Redis. A running Celery worker consumes the task from Redis and executes perform_backup. The project also configures Redis as the Celery result backend.
+### `perform_backup`
 
-While the worker is processing the task, the Backup record is updated from pending to running, and after successful completion it is changed to completed with the generated backup path. A separate GET request can then be used to check the current backup status.
+`perform_backup` connects to the application's Kubernetes cluster, finds one current Pod belonging to the App, and creates a `.tar.gz` archive of the requested path. The archive is Base64-encoded during transfer, decoded by the worker, saved under `/backups`, and validated. The task uses controlled retries and time limits.
 
----
+## Handling Backups Stuck in `pending`
 
-### General Explanation of perform_backup
+A periodic Celery Beat task finds backups that have remained `pending` for more than 24 hours and marks them as `failed`.
 
-perform_backup is the Celery background task responsible for performing the complete backup operation.
-
-It first retrieves the requested Backup record and marks it as running. It then obtains the Kubernetes connection associated with the application's cluster and verifies that the requested pod actually belongs to the application. After that, it creates a dated backup directory on the Celery worker and requests the selected pod to create a gzip-compressed tar archive of the specified source path.
-
-Because the Kubernetes exec stream is not suitable for transporting raw binary data directly, the archive is Base64-encoded inside the pod. The worker receives the encoded data, decodes it back to binary, stores the resulting .tar.gz file under /backups, and verifies that the generated data is a valid gzip archive.
-
-Finally, the task updates the database record with the backup path, completion status, and completion time. If an exception occurs, the backup is marked as failed and the exception is propagated so Celery's retry mechanism can handle it.
-
-
-
-## Handling Backups Stuck in pending
-
-A background Celery Beat task checks for backups that have remained in pending status for more than 24 hours. The check runs periodically and identifies backups whose created_at is older than the 24-hour threshold.
-
-When such a backup is found, it is marked as failed and an error message is stored explaining that the task may have been affected by an unavailable worker or a stuck Celery queue.
+The backup task also uses up to three controlled retries with backoff and execution time limits.
 
 ## Scheduled Backups
 
-Scheduled backups are separated from individual backup executions using two database models:
+`ScheduleBackup` stores the recurring App backup definition: App, source path, cron expression, creation time, and active state. `Backup` represents each actual execution and has its own ID and `is_scheduled` flag.
 
-`ScheduleBackup` stores the recurring backup definition, including the application, pod, source path, backup due time, creation time, and active state.
+The same `POST /backup` endpoint creates a schedule when `schedule` is provided. The cron expression is validated and duplicate active schedules are rejected.
 
-`Backup` represents one actual backup execution and has its own ID, status, creation time, and is_scheduled flag.
+Celery Beat checks active schedules every minute. When a schedule is due, it creates a new `Backup` record and submits it to Celery. The worker then executes the normal `perform_backup` task.
 
-The same POST /backup endpoint is used for both immediate and scheduled backups. When a schedule value is included, a ScheduleBackup record is created. **The API prevents duplicate active schedules with the same application, pod, source path, and Due time.**
-
-Celery Beat runs the scheduled-backup task every minute. The task checks active ScheduleBackup records and uses their cron expressions to determine which schedules are due. For every matching schedule, it creates a new Backup record with is_scheduled=True and submits its ID to Celery.
-
-The Celery worker then executes the normal perform_backup task, so scheduled and immediate backups use the same backup execution mechanism.
-
-Each scheduled execution therefore receives a separate backup_id, appears in the application's backup list, and can be monitored through the normal backup status endpoint. A schedule can be deactivated by setting its active field to False; the record remains in the database but is no longer processed by the scheduler.
+Each execution has its own `backup_id` and can be tracked through the normal backup endpoints. A schedule can be deactivated by setting `active=False`.
 
 ## Redis Cache for App Status
 
-Redis is also used as a short-lived cache for the live status of each application.
+Redis caches the live Kubernetes status of each App for **60 seconds**.
 
-When the App API requests application information, the backend first checks Redis using an App-specific cache key. If the status is available, the cached result is returned without querying Kubernetes.
+On a cache hit, the API returns the cached status without querying Kubernetes. On a miss, it queries the App's Pods, calculates the current status, and stores it in Redis.
 
-On a cache miss, the backend queries Kubernetes for the application's Pods and calculates the current status, including whether the desired replicas are ready and the readiness of individual Pods. This live status is then stored in Redis with a TTL of 60 seconds.
+Only App status is cached; Backup and other application data remain in the database.
 
-After 60 seconds, the cache expires automatically, and the next request queries Kubernetes again and refreshes the cache.
-
-Only live Kubernetes status is cached. The application's database data and Backup data are not stored in this cache.
-
-Redis is separated into different logical databases: one for the Celery broker, one for Celery results, and one for application status caching.
+Redis uses separate logical databases for the Celery broker, Celery results, and App-status cache.

@@ -7,6 +7,8 @@ from applications.models import App
 from .models import Backup, ScheduleBackup
 from .tasks import perform_backup
 from .serializers import BackupSerializer, ScheduleBackupSerializer
+from croniter import croniter
+from croniter.croniter import CroniterBadCronError
 
 
 class BackupView(APIView):
@@ -35,6 +37,17 @@ class BackupView(APIView):
 
         # Scheduled backup
         if schedule:
+            try:
+                croniter(schedule)
+            except (CroniterBadCronError, ValueError):
+                return Response(
+                    {
+                        "error": "Invalid cron expression",
+                        "schedule": schedule,
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            
             already_exists = ScheduleBackup.objects.filter(
                 app=app,
                 source_path=source_path,
@@ -71,7 +84,6 @@ class BackupView(APIView):
             )
 
         # Instant backup
-
         backup = Backup.objects.create(
             app=app,
             source_path=source_path,
