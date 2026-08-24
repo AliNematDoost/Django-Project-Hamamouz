@@ -12,7 +12,8 @@ class BackupSerializer(serializers.ModelSerializer):
             "backup_id",
             "status",
             "pod_name",
-            "error"
+            "error",
+            "is_scheduled"
         ]
 
     def get_backup_id(self, obj):
