@@ -18,7 +18,6 @@ class Backup(models.Model):
         on_delete=models.CASCADE,
         related_name="backups",
     )
-    pod_name = models.CharField(max_length=255)
     source_path = models.TextField()
     output_path = models.TextField(blank=True)
     status = models.CharField(
@@ -26,6 +25,7 @@ class Backup(models.Model):
         choices=STATUS_CHOICES,
         default="pending",
     )
+    pod_name = models.CharField(blank=True)
     error = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     completed_at = models.DateTimeField(null=True, blank=True)
@@ -44,7 +44,6 @@ class ScheduleBackup(models.Model):
         related_name="scheduled_backups",
     )
 
-    pod_name = models.CharField(max_length=255)
     source_path = models.TextField()
 
     # Cron expression, e.g. "0 20 * * *"

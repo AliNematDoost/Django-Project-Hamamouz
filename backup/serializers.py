@@ -29,7 +29,6 @@ class ScheduleBackupSerializer(serializers.ModelSerializer):
             "schedule_backup_id",
             "schedule",
             "source_path",
-            "pod_name",
             "created_at",
             "active",
         ]

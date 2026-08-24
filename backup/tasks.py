@@ -7,7 +7,7 @@ from kubernetes.stream import stream
 from clusters.k8s_client import get_core_v1_api
 from .models import Backup, ScheduleBackup
 from croniter import croniter
-
+from applications.models import App
 
 @shared_task(
     bind=True,
@@ -36,10 +36,13 @@ def perform_backup(self, backup_id):
             _request_timeout=5,
         )
 
-        pod_names = {pod.metadata.name for pod in pods.items}
-
-        if backup.pod_name not in pod_names:
-            raise ValueError("Requested pod does not belong to this App")
+        if not pods.items:
+            raise ValueError(
+                f"No pods found for App '{app.name}'"
+            )
+        
+        pod = pods.items[0]
+        pod_name = pod.metadata.name
 
         # Destination on the Celery worker.
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -59,7 +62,7 @@ def perform_backup(self, backup_id):
 
         resp = stream(
             core_api.connect_get_namespaced_pod_exec,
-            backup.pod_name,
+            pod_name,
             app.namespace.name,
             command=command,
             stderr=True,
@@ -104,11 +107,13 @@ def perform_backup(self, backup_id):
         backup.status = "completed"
         backup.completed_at = datetime.now(timezone.utc)
         backup.error = "No error"
+        backup.pod_name = pod_name
 
         backup.save(
             update_fields=[
                 "output_path",
                 "status",
+                "pod_name",
                 "completed_at",
                 "error"
             ]
@@ -158,12 +163,20 @@ def process_scheduled_backups():
         microsecond=0,
     )
 
-    schedules = ScheduleBackup.objects.filter(
+    schedules = ScheduleBackup.objects.select_related(
+        "app",
+        "app__namespace",
+        "app__namespace__cluster",
+    ).filter(
         active=True
     )
 
     for schedule in schedules:
-
+        try:
+            app = schedule.app
+        except App.DoesNotExist:
+            continue
+        
         if not croniter.match(
             schedule.schedule,
             now,
@@ -172,7 +185,6 @@ def process_scheduled_backups():
 
         backup = Backup.objects.create(
             app=schedule.app,
-            pod_name=schedule.pod_name,
             source_path=schedule.source_path,
             status="pending",
             created_at=now,

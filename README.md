@@ -43,6 +43,27 @@ If two DELETE requests for the same Namespace arrive at nearly the same time, `s
 
 These two updates are applied to both namespace and application delete operations.
 
+### Deleting scheduled backups after their app is deleted
+
+Because ScheduleBackup.app is a foreign key, normally deleting the App will also delete its schedules because of `on_delete=models.CASCADE`. But checking it explicitly is still useful and I have done so in `process_scheduled_backups` using this code:
+```
+try:
+    app = schedule.app
+except App.DoesNotExist:
+    continue
+```
+
+### Using app instead of pod name
+
+At first I used to use an specific pod name to backup from, but after thinking deeper about concept of depeloyment I got that a Pod is ephemeral and after crashing deployment would remake another pod with a different pod name, so storing a specific Pod name in Backup/ScheduleBackup makes the schedule fragile.
+
+So I decided to use app name for getting backup from one of it pods as mentioned in project doc. 
+
+### Deactivate an scheduled backup 
+
+We may need scheduled backup for a while and do not need it anymore, so I created a `PATCH` API to deactivate it. For that purpose created field `active` for each record of scheduled backup. 
+
+
 ## Instant Backup
 
 ### Request Execution Flow with Celery and Redis

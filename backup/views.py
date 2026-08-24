@@ -14,7 +14,6 @@ class BackupView(APIView):
     def post(self, request):
         app_id = request.data.get("app_id")
         source_path = request.data.get("source_path")
-        pod_name = request.data.get("pod_name")
         schedule = request.data.get("schedule")
 
         if not app_id or not source_path:
@@ -36,15 +35,8 @@ class BackupView(APIView):
 
         # Scheduled backup
         if schedule:
-            if not pod_name:
-                return Response(
-                    {"error": "pod_name is required for scheduled backup"},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-            
             already_exists = ScheduleBackup.objects.filter(
                 app=app,
-                pod_name=pod_name,
                 source_path=source_path,
                 schedule=schedule,
                 active=True,
@@ -55,7 +47,7 @@ class BackupView(APIView):
                     {
                         "error": (
                             "An active scheduled backup with the same "
-                            "app, pod, source path and schedule already exists"
+                            "app, source path and schedule already exists"
                         )
                     },
                     status=status.HTTP_409_CONFLICT,
@@ -63,7 +55,6 @@ class BackupView(APIView):
 
             scheduled_backup = ScheduleBackup.objects.create(
                 app=app,
-                pod_name=pod_name,
                 source_path=source_path,
                 schedule=schedule,
                 active=True,
@@ -80,15 +71,9 @@ class BackupView(APIView):
             )
 
         # Instant backup
-        if not pod_name:
-            return Response(
-                {"error": "pod_name is required for instant backup"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
 
         backup = Backup.objects.create(
             app=app,
-            pod_name=pod_name,
             source_path=source_path,
             status="pending",
             is_scheduled=False,
