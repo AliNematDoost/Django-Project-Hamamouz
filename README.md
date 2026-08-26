@@ -63,6 +63,9 @@ So I decided to use app name for getting backup from one of it pods as mentioned
 
 We may need scheduled backup for a while and do not need it anymore, so I created a `PATCH` API to deactivate it. For that purpose created field `active` for each record of scheduled backup. 
 
+### No need to start app manually
+
+Dockerfile for django app and docker-compose file are added to project, so that the whole project could be up using `docker compose up`. Using `start.sh` all three processes for django and celery worker and celery beat will be up in a single container.
 
 ## Instant Backup
 
