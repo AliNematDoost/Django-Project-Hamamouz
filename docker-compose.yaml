@@ -1,0 +1,29 @@
+services:
+
+    django:
+        build: .
+        image: django
+        container_name: django-app
+        restart: unless-stopped
+        ports:
+            - "8000:8000"
+        depends_on:
+            redis:
+                condition: service_healthy
+        networks:
+            - app-network
+
+    redis:
+        image: hub.hamdocker.ir/library/redis:7
+        container_name: redis
+        restart: unless-stopped
+        networks:
+            - app-network
+        healthcheck:
+            test: ["CMD", "redis-cli", "ping"]
+            interval: 5s
+            timeout: 3s
+            retries: 5
+
+networks:
+  app-network:
