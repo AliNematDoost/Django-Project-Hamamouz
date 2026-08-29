@@ -4,3 +4,5 @@ kubernetes
 redis
 celery
 croniter
+psycopg[binary]
+gunicorn
