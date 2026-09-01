@@ -23,4 +23,5 @@ urlpatterns = [
     path('api/', include('namespaces.urls')),
     path('api/', include('applications.urls')),
     path('api/', include('backup.urls')),
+    path('api/', include('django_prometheus.urls')),
 ]
