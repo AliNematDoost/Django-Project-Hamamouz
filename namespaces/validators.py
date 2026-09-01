@@ -1,6 +1,5 @@
 import re
 
-
 DNS_1123_LABEL = re.compile(r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$")
 
 

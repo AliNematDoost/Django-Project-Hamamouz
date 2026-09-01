@@ -9,6 +9,8 @@ from .models import Backup, ScheduleBackup
 from croniter import croniter
 from applications.models import App
 from clusterproject.metrics import hamamooz_backup_jobs_total
+from clusterproject.metrics import hamamooz_kubernetes_operations_total
+
 
 @shared_task(
     bind=True,
@@ -30,16 +32,20 @@ def perform_backup(self, backup_id):
 
         core_api = get_core_v1_api(cluster)
 
-        pods = core_api.list_namespaced_pod(
-            app.namespace.name,
-            label_selector=f"app={app.name}",
-            _request_timeout=5,
-        )
+        try:
+            pods = core_api.list_namespaced_pod(
+                app.namespace.name,
+                label_selector=f"app={app.name}",
+                _request_timeout=10,
+            )
+            hamamooz_kubernetes_operations_total.labels("app", "list", "success").inc()
+
+        except Exception:
+            hamamooz_kubernetes_operations_total.labels("app", "list", "error").inc()
+            raise
 
         if not pods.items:
-            raise ValueError(
-                f"No pods found for App '{app.name}'"
-            )
+            raise ValueError(f"No pods found for App '{app.name}'")
 
         pod = pods.items[0]
         pod_name = pod.metadata.name
@@ -56,17 +62,23 @@ def perform_backup(self, backup_id):
             f"tar -czf - {backup.source_path} | base64 -w 0",
         ]
 
-        resp = stream(
-            core_api.connect_get_namespaced_pod_exec,
-            pod_name,
-            app.namespace.name,
-            command=command,
-            stderr=True,
-            stdin=False,
-            stdout=True,
-            tty=False,
-            _preload_content=False,
-        )
+        try:
+            resp = stream(
+                core_api.connect_get_namespaced_pod_exec,
+                pod_name,
+                app.namespace.name,
+                command=command,
+                stderr=True,
+                stdin=False,
+                stdout=True,
+                tty=False,
+                _preload_content=False,
+            )
+            hamamooz_kubernetes_operations_total.labels("app", "exec", "success").inc()
+
+        except Exception:
+            hamamooz_kubernetes_operations_total.labels("app", "exec", "error").inc()
+            raise
 
         stdout_data = []
         stderr_data = []
@@ -105,13 +117,7 @@ def perform_backup(self, backup_id):
         backup.pod_name = pod_name
 
         backup.save(
-            update_fields=[
-                "output_path",
-                "status",
-                "pod_name",
-                "completed_at",
-                "error"
-            ]
+            update_fields=["output_path", "status", "pod_name", "completed_at", "error"]
         )
 
         hamamooz_backup_jobs_total.labels("app", "create", "success", "completed").inc()
@@ -153,3 +159,39 @@ def fail_stale_pending_backups():
             count += 1
 
     return count
+
+
+@shared_task
+def process_scheduled_backups():
+    now = datetime.now(timezone.utc).replace(
+        second=0,
+        microsecond=0,
+    )
+
+    schedules = ScheduleBackup.objects.select_related(
+        "app",
+        "app__namespace",
+        "app__namespace__cluster",
+    ).filter(active=True)
+
+    for schedule in schedules:
+        try:
+            app = schedule.app
+        except App.DoesNotExist:
+            continue
+
+        if not croniter.match(
+            schedule.schedule,
+            now,
+        ):
+            continue
+
+        backup = Backup.objects.create(
+            app=schedule.app,
+            source_path=schedule.source_path,
+            status="pending",
+            created_at=now,
+            is_scheduled=True,
+        )
+
+        perform_backup.delay(str(backup.id))

@@ -31,6 +31,7 @@ class Backup(models.Model):
     completed_at = models.DateTimeField(null=True, blank=True)
     is_scheduled = models.BooleanField(default=False)
 
+
 class ScheduleBackup(models.Model):
     id = models.UUIDField(
         primary_key=True,

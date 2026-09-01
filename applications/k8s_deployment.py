@@ -20,7 +20,9 @@ def build_deployment_body(app: "App") -> client.V1Deployment:
         selector=client.V1LabelSelector(match_labels=labels),
         template=template,
     )
-    return client.V1Deployment(metadata=client.V1ObjectMeta(name=app.name, labels=labels), spec=spec)
+    return client.V1Deployment(
+        metadata=client.V1ObjectMeta(name=app.name, labels=labels), spec=spec
+    )
 
 
 def get_pod_statuses(core_api, namespace_name: str, app_name: str) -> list[dict]:
@@ -32,6 +34,8 @@ def get_pod_statuses(core_api, namespace_name: str, app_name: str) -> list[dict]
     for pod in pods.items:
         ready = False
         if pod.status.conditions:
-            ready = any(c.type == "Ready" and c.status == "True" for c in pod.status.conditions)
+            ready = any(
+                c.type == "Ready" and c.status == "True" for c in pod.status.conditions
+            )
         statuses.append({"name": pod.metadata.name, "ready": ready})
     return statuses

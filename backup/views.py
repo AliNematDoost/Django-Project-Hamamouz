@@ -138,9 +138,7 @@ class AppBackupListView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        backups = Backup.objects.filter(
-            app_id=app_id
-        ).order_by("-created_at")
+        backups = Backup.objects.filter(app_id=app_id).order_by("-created_at")
 
         serializer = BackupSerializer(
             backups,
@@ -158,9 +156,7 @@ class ScheduleBackupDeactivateView(APIView):
 
     def patch(self, request, schedule_id):
         try:
-            scheduled_backup = ScheduleBackup.objects.get(
-                id=schedule_id
-            )
+            scheduled_backup = ScheduleBackup.objects.get(id=schedule_id)
         except ScheduleBackup.DoesNotExist:
             hamamooz_backup_jobs_total.labels("app", "update", "error", "").inc()
             return Response(
@@ -203,9 +199,7 @@ class AppScheduleBackupListView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        schedules = ScheduleBackup.objects.filter(
-            app_id=app_id
-        ).order_by("-created_at")
+        schedules = ScheduleBackup.objects.filter(app_id=app_id).order_by("-created_at")
 
         serializer = ScheduleBackupSerializer(
             schedules,

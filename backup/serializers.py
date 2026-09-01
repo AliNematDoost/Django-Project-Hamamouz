@@ -14,11 +14,12 @@ class BackupSerializer(serializers.ModelSerializer):
             "pod_name",
             "error",
             "output_path",
-            "is_scheduled"
+            "is_scheduled",
         ]
 
     def get_backup_id(self, obj):
         return f"bkp_{obj.id}"
+
 
 class ScheduleBackupSerializer(serializers.ModelSerializer):
     schedule_backup_id = serializers.SerializerMethodField()

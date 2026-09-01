@@ -23,24 +23,13 @@ class ClusterView(APIView):
             cluster = Cluster.objects.get(pk=pk)
         except Cluster.DoesNotExist:
             return Response(
-                {"detail": "Cluster not found."},
-                status=status.HTTP_404_NOT_FOUND
+                {"detail": "Cluster not found."}, status=status.HTTP_404_NOT_FOUND
             )
 
-        serializer = ClusterTokenSerializer(
-            cluster,
-            data=request.data,
-            partial=True
-        )
+        serializer = ClusterTokenSerializer(cluster, data=request.data, partial=True)
 
         if serializer.is_valid():
             serializer.save()
-            return Response(
-                ClusterSerializer(cluster).data,
-                status=status.HTTP_200_OK
-            )
+            return Response(ClusterSerializer(cluster).data, status=status.HTTP_200_OK)
 
-        return Response(
-            serializer.errors,
-            status=status.HTTP_400_BAD_REQUEST
-        )
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
