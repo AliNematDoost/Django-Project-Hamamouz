@@ -26,7 +26,7 @@ def build_deployment_body(app: "App") -> client.V1Deployment:
 def get_pod_statuses(core_api, namespace_name: str, app_name: str) -> list[dict]:
     """Live pod status straight from Kubernetes, never from DB."""
     pods = core_api.list_namespaced_pod(
-        namespace_name, label_selector=f"app={app_name}", _request_timeout=5
+        namespace_name, label_selector=f"app={app_name}", _request_timeout=10
     )
     statuses = []
     for pod in pods.items:

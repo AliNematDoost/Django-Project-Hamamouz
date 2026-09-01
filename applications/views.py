@@ -63,25 +63,28 @@ class AppListCreateView(APIView):
 					app.name,
 				)
 
-				overall_ready = (
-					len(pods) == app.replicas
-					and all(p["ready"] for p in pods)
-				)
+				ready_count = 0
+				for pod in pods:
+					if pod["ready"]:
+						ready_count += 1
+
+				overall_ready = ready_count >= app.replicas
 
 			except Exception:
 				pods = []
-				overall_ready = False
+				overall_ready = None
 
 			live_status = {
 				"ready": overall_ready,
 				"pods": pods,
 			}
 
-			cache.set(
-				cache_key,
-				live_status,
-				timeout=60,
-			)
+			if overall_ready is not None:
+				cache.set(
+					cache_key,
+					live_status,
+					timeout=60,
+				)
 
 			data = AppSerializer(app).data
 			data.update(live_status)
