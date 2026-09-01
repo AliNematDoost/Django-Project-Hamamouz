@@ -9,7 +9,7 @@ from .tasks import perform_backup
 from .serializers import BackupSerializer, ScheduleBackupSerializer
 from croniter import croniter
 from croniter.croniter import CroniterBadCronError
-
+from clusterproject.metrics import hamamooz_backup_jobs_total
 
 class BackupView(APIView):
 
@@ -19,6 +19,7 @@ class BackupView(APIView):
         schedule = request.data.get("schedule")
 
         if not app_id or not source_path:
+            hamamooz_backup_jobs_total.labels("app", "create", "error", "").inc()
             return Response(
                 {"error": "app_id and source_path are required"},
                 status=status.HTTP_400_BAD_REQUEST,
@@ -30,6 +31,7 @@ class BackupView(APIView):
                 "namespace__cluster",
             ).get(id=app_id)
         except App.DoesNotExist:
+            hamamooz_backup_jobs_total.labels("app", "create", "error", "").inc()
             return Response(
                 {"error": "App not found"},
                 status=status.HTTP_404_NOT_FOUND,
@@ -40,6 +42,7 @@ class BackupView(APIView):
             try:
                 croniter(schedule)
             except (CroniterBadCronError, ValueError):
+                hamamooz_backup_jobs_total.labels("app", "create", "error", "").inc()
                 return Response(
                     {
                         "error": "Invalid cron expression",
@@ -47,7 +50,7 @@ class BackupView(APIView):
                     },
                     status=status.HTTP_400_BAD_REQUEST,
                 )
-            
+
             already_exists = ScheduleBackup.objects.filter(
                 app=app,
                 source_path=source_path,
@@ -56,6 +59,7 @@ class BackupView(APIView):
             ).exists()
 
             if already_exists:
+                hamamooz_backup_jobs_total.labels("app", "create", "error", "").inc()
                 return Response(
                     {
                         "error": (
@@ -73,6 +77,7 @@ class BackupView(APIView):
                 active=True,
             )
 
+            hamamooz_backup_jobs_total.labels("app", "create", "success", "").inc()
             return Response(
                 {
                     "schedule_backup_id": str(scheduled_backup.id),
@@ -93,6 +98,7 @@ class BackupView(APIView):
 
         perform_backup.delay(str(backup.id))
 
+        hamamooz_backup_jobs_total.labels("app", "create", "success", "").inc()
         return Response(
             {
                 "backup_id": f"bkp_{backup.id}",
@@ -108,22 +114,25 @@ class BackupStatusView(APIView):
         try:
             backup = Backup.objects.get(id=backup_id)
         except Backup.DoesNotExist:
+            hamamooz_backup_jobs_total.labels("app", "list", "error", "").inc()
             return Response(
                 {"error": "Backup not found"},
                 status=status.HTTP_404_NOT_FOUND,
             )
 
         serializer = BackupSerializer(backup)
-
+        hamamooz_backup_jobs_total.labels("app", "list", "success", "").inc()
         return Response(
             serializer.data,
             status=status.HTTP_200_OK,
         )
 
+
 class AppBackupListView(APIView):
 
     def get(self, request, app_id):
         if not App.objects.filter(id=app_id).exists():
+            hamamooz_backup_jobs_total.labels("app", "list", "error", "").inc()
             return Response(
                 {"error": "App not found"},
                 status=status.HTTP_404_NOT_FOUND,
@@ -138,10 +147,12 @@ class AppBackupListView(APIView):
             many=True,
         )
 
+        hamamooz_backup_jobs_total.labels("app", "list", "success", "").inc()
         return Response(
             serializer.data,
             status=status.HTTP_200_OK,
         )
+
 
 class ScheduleBackupDeactivateView(APIView):
 
@@ -151,12 +162,14 @@ class ScheduleBackupDeactivateView(APIView):
                 id=schedule_id
             )
         except ScheduleBackup.DoesNotExist:
+            hamamooz_backup_jobs_total.labels("app", "update", "error", "").inc()
             return Response(
                 {"error": "Scheduled backup not found"},
                 status=status.HTTP_404_NOT_FOUND,
             )
 
         if not scheduled_backup.active:
+            hamamooz_backup_jobs_total.labels("app", "update", "success", "").inc()
             return Response(
                 {
                     "schedule_backup_id": str(scheduled_backup.id),
@@ -169,6 +182,7 @@ class ScheduleBackupDeactivateView(APIView):
         scheduled_backup.active = False
         scheduled_backup.save(update_fields=["active"])
 
+        hamamooz_backup_jobs_total.labels("app", "update", "success", "").inc()
         return Response(
             {
                 "schedule_backup_id": str(scheduled_backup.id),
@@ -178,10 +192,12 @@ class ScheduleBackupDeactivateView(APIView):
             status=status.HTTP_200_OK,
         )
 
+
 class AppScheduleBackupListView(APIView):
 
     def get(self, request, app_id):
         if not App.objects.filter(id=app_id).exists():
+            hamamooz_backup_jobs_total.labels("app", "list", "error", "").inc()
             return Response(
                 {"error": "App not found"},
                 status=status.HTTP_404_NOT_FOUND,
@@ -196,6 +212,7 @@ class AppScheduleBackupListView(APIView):
             many=True,
         )
 
+        hamamooz_backup_jobs_total.labels("app", "list", "success", "").inc()
         return Response(
             serializer.data,
             status=status.HTTP_200_OK,

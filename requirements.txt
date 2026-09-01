@@ -8,3 +8,4 @@ psycopg[binary]
 gunicorn
 django-cors-headers
 django-prometheus
+prometheus-client

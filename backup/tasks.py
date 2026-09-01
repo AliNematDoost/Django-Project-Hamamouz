@@ -8,6 +8,7 @@ from clusters.k8s_client import get_core_v1_api
 from .models import Backup, ScheduleBackup
 from croniter import croniter
 from applications.models import App
+from clusterproject.metrics import hamamooz_backup_jobs_total
 
 @shared_task(
     bind=True,
@@ -29,7 +30,6 @@ def perform_backup(self, backup_id):
 
         core_api = get_core_v1_api(cluster)
 
-        # Verify that the pod belongs to the application.
         pods = core_api.list_namespaced_pod(
             app.namespace.name,
             label_selector=f"app={app.name}",
@@ -40,20 +40,16 @@ def perform_backup(self, backup_id):
             raise ValueError(
                 f"No pods found for App '{app.name}'"
             )
-        
+
         pod = pods.items[0]
         pod_name = pod.metadata.name
 
-        # Destination on the Celery worker.
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         backup_dir = Path("/backups") / str(app.id) / today
         backup_dir.mkdir(parents=True, exist_ok=True)
 
         output_path = backup_dir / f"bkp_{backup.id}.tar.gz"
 
-        # Create the tar.gz inside the pod and encode it as base64.
-        # base64 makes it safe to transfer through the Kubernetes exec
-        # text stream without corrupting binary tar.gz data.
         command = [
             "sh",
             "-c",
@@ -99,7 +95,6 @@ def perform_backup(self, backup_id):
         with open(output_path, "wb") as f:
             f.write(archive_data)
 
-        # Verify that the generated file is actually a gzip archive.
         if archive_data[:2] != b"\x1f\x8b":
             raise RuntimeError("Generated backup is not a valid gzip archive")
 
@@ -119,10 +114,13 @@ def perform_backup(self, backup_id):
             ]
         )
 
+        hamamooz_backup_jobs_total.labels("app", "create", "success", "completed").inc()
     except Exception as exc:
         backup.status = "failed"
         backup.error = str(exc)
         backup.save(update_fields=["status", "error"])
+
+        hamamooz_backup_jobs_total.labels("app", "create", "error", "failed").inc()
         raise
 
 
@@ -141,7 +139,6 @@ def fail_stale_pending_backups():
         with transaction.atomic():
             backup = Backup.objects.select_for_update().get(pk=backup.pk)
 
-            # It may have been processed while this task was running.
             if backup.status != "pending":
                 continue
 
@@ -151,46 +148,8 @@ def fail_stale_pending_backups():
                 "The Celery worker or queue may have been unavailable."
             )
             backup.save(update_fields=["status", "error"])
+            hamamooz_backup_jobs_total.labels("app", "create", "error", "failed").inc()
 
             count += 1
 
     return count
-
-@shared_task
-def process_scheduled_backups():
-    now = datetime.now(timezone.utc).replace(
-        second=0,
-        microsecond=0,
-    )
-
-    schedules = ScheduleBackup.objects.select_related(
-        "app",
-        "app__namespace",
-        "app__namespace__cluster",
-    ).filter(
-        active=True
-    )
-
-    for schedule in schedules:
-        try:
-            app = schedule.app
-        except App.DoesNotExist:
-            continue
-        
-        if not croniter.match(
-            schedule.schedule,
-            now,
-        ):
-            continue
-
-        backup = Backup.objects.create(
-            app=schedule.app,
-            source_path=schedule.source_path,
-            status="pending",
-            created_at=now,
-            is_scheduled=True,
-        )
-
-        perform_backup.delay(
-            str(backup.id)
-        )
