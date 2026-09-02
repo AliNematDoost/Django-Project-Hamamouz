@@ -10,7 +10,8 @@ from croniter import croniter
 from applications.models import App
 from clusterproject.metrics import hamamooz_backup_jobs_total
 from clusterproject.metrics import hamamooz_kubernetes_operations_total
-
+from clusterproject.metrics import hamamooz_kubernetes_operation_duration_seconds
+import time
 
 @shared_task(
     bind=True,
@@ -33,12 +34,16 @@ def perform_backup(self, backup_id):
         core_api = get_core_v1_api(cluster)
 
         try:
+            start = time.monotonic()
             pods = core_api.list_namespaced_pod(
                 app.namespace.name,
                 label_selector=f"app={app.name}",
                 _request_timeout=10,
             )
+            duration = time.monotonic() - start
+
             hamamooz_kubernetes_operations_total.labels("app", "list", "success").inc()
+            hamamooz_kubernetes_operation_duration_seconds.labels("app", "list").observe(duration)
 
         except Exception:
             hamamooz_kubernetes_operations_total.labels("app", "list", "error").inc()
@@ -63,6 +68,7 @@ def perform_backup(self, backup_id):
         ]
 
         try:
+            start = time.monotonic()
             resp = stream(
                 core_api.connect_get_namespaced_pod_exec,
                 pod_name,
@@ -74,7 +80,10 @@ def perform_backup(self, backup_id):
                 tty=False,
                 _preload_content=False,
             )
+            duration = time.monotonic() - start
+            
             hamamooz_kubernetes_operations_total.labels("app", "exec", "success").inc()
+            hamamooz_kubernetes_operation_duration_seconds.labels("app", "exec").observe(duration)
 
         except Exception:
             hamamooz_kubernetes_operations_total.labels("app", "exec", "error").inc()

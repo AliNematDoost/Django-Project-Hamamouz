@@ -13,7 +13,8 @@ from .models import App
 from .serializers import AppSerializer
 from django.core.cache import cache
 from clusterproject.metrics import hamamooz_kubernetes_operations_total
-
+from clusterproject.metrics import hamamooz_kubernetes_operation_duration_seconds
+import time
 
 class AppListCreateView(APIView):
     def get(self, request):
@@ -56,14 +57,21 @@ class AppListCreateView(APIView):
                 continue
 
             try:
+                start = time.monotonic()
                 pods = get_pod_statuses(
                     core_api,
                     namespace.name,
                     app.name,
                 )
+                duration = time.monotonic() - start
+
                 hamamooz_kubernetes_operations_total.labels(
                     "app", "list", "success"
                 ).inc()
+
+                hamamooz_kubernetes_operation_duration_seconds.labels(
+                    "app", "list"
+                ).observe(duration)
 
                 ready_count = 0
                 for pod in pods:
@@ -145,12 +153,20 @@ class AppListCreateView(APIView):
         apps_api = get_apps_v1_api(namespace.cluster)
         body = build_deployment_body(app)
         try:
+            start = time.monotonic()
             apps_api.create_namespaced_deployment(
                 namespace.name, body, _request_timeout=10
             )
+            duration = time.monotonic() - start
+
             hamamooz_kubernetes_operations_total.labels(
                 "app", "create", "success"
             ).inc()
+
+            hamamooz_kubernetes_operation_duration_seconds.labels(
+                "app", "create"
+            ).observe(duration)
+
         except ApiException as e:
             hamamooz_kubernetes_operations_total.labels("app", "create", "error").inc()
 
@@ -218,13 +234,20 @@ class AppDetailView(APIView):
         apps_api = get_apps_v1_api(app.namespace.cluster)
         body = build_deployment_body(app)
         try:
+            start = time.monotonic()
             apps_api.patch_namespaced_deployment(
                 app.name, app.namespace.name, body, _request_timeout=10
             )
+            duration = time.monotonic() - start
 
             hamamooz_kubernetes_operations_total.labels(
                 "app", "update", "success"
             ).inc()
+
+            hamamooz_kubernetes_operation_duration_seconds.labels(
+                "app", "update"
+            ).observe(duration)
+
         except ApiException as e:
             hamamooz_kubernetes_operations_total.labels("app", "update", "error").inc()
 
@@ -269,12 +292,19 @@ class AppDetailView(APIView):
                 apps_api = get_apps_v1_api(app.namespace.cluster)
 
                 try:
+                    start = time.monotonic()
                     apps_api.delete_namespaced_deployment(
                         app.name, app.namespace.name, _request_timeout=5
                     )
+                    duration = time.monotonic() - start
+
                     hamamooz_kubernetes_operations_total.labels(
                         "app", "delete", "success"
                     ).inc()
+
+                    hamamooz_kubernetes_operation_duration_seconds.labels(
+                        "app", "delete"
+                    ).observe(duration)
 
                 except ApiException as e:
                     hamamooz_kubernetes_operations_total.labels(

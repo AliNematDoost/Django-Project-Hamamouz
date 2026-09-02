@@ -8,7 +8,8 @@ from .models import Namespace
 from .serializers import NamespaceSerializer
 from .k8s_client import get_core_v1_api
 from django.db import transaction
-from clusterproject.metrics import hamamooz_kubernetes_operations_total
+from clusterproject.metrics import hamamooz_kubernetes_operations_total, hamamooz_kubernetes_operation_duration_seconds
+import time
 
 class NamespaceListCreateView(APIView):
     def get(self, request):
@@ -46,10 +47,17 @@ class NamespaceListCreateView(APIView):
         api = get_core_v1_api(cluster)
         body = k8s_client.V1Namespace(metadata=k8s_client.V1ObjectMeta(name=name))
         try:
+            start = time.monotonic()
             api.create_namespace(body)
+            duration = time.monotonic() - start
+
             hamamooz_kubernetes_operations_total.labels(
                 "namespace", "create", "success"
             ).inc()
+
+            hamamooz_kubernetes_operation_duration_seconds.labels(
+                "namespace", "create"
+            ).observe(duration)
 
         except ApiException as e:
             hamamooz_kubernetes_operations_total.labels(
@@ -101,10 +109,17 @@ class NamespaceDeleteView(APIView):
                 api = get_core_v1_api(cluster)
 
                 try:
+                    start = time.monotonic()
                     api.delete_namespace(namespace.name)
+                    duration = time.monotonic() - start
+
                     hamamooz_kubernetes_operations_total.labels(
                         "namespace", "delete", "success"
                     ).inc()
+
+                    hamamooz_kubernetes_operation_duration_seconds.labels(
+                        "namespace", "delete"
+                    ).observe(duration)
 
                 except ApiException as e:
                     hamamooz_kubernetes_operations_total.labels(
