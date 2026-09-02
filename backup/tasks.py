@@ -11,6 +11,7 @@ from applications.models import App
 from clusterproject.metrics import hamamooz_backup_jobs_total
 from clusterproject.metrics import hamamooz_kubernetes_operations_total
 from clusterproject.metrics import hamamooz_kubernetes_operation_duration_seconds
+from clusterproject.metrics import hamamooz_backup_duration_seconds
 import time
 
 @shared_task(
@@ -23,6 +24,8 @@ import time
 )
 def perform_backup(self, backup_id):
     backup = Backup.objects.get(id=backup_id)
+
+    start = time.monotonic()
 
     backup.status = "running"
     backup.save(update_fields=["status"])
@@ -81,7 +84,7 @@ def perform_backup(self, backup_id):
                 _preload_content=False,
             )
             duration = time.monotonic() - start
-            
+
             hamamooz_kubernetes_operations_total.labels("app", "exec", "success").inc()
             hamamooz_kubernetes_operation_duration_seconds.labels("app", "exec").observe(duration)
 
@@ -119,6 +122,9 @@ def perform_backup(self, backup_id):
         if archive_data[:2] != b"\x1f\x8b":
             raise RuntimeError("Generated backup is not a valid gzip archive")
 
+        duration = time.monotonic() - start
+        hamamooz_backup_duration_seconds.observe(duration)
+        
         backup.output_path = str(output_path)
         backup.status = "completed"
         backup.completed_at = datetime.now(timezone.utc)

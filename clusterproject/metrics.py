@@ -17,3 +17,8 @@ hamamooz_kubernetes_operation_duration_seconds = Histogram(
     "Duration of Kubernetes operations",
     ["resource", "operation"],
 )
+
+hamamooz_backup_duration_seconds = Histogram(
+    "hamamooz_backup_duration_seconds",
+    "Duration of backup work",
+)
