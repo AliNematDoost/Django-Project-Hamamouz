@@ -1,4 +1,4 @@
-from prometheus_client import Counter, Histogram
+from prometheus_client import Counter, Histogram, Gauge
 
 hamamooz_backup_jobs_total = Counter(
     "hamamooz_backup_jobs_total",
@@ -21,4 +21,9 @@ hamamooz_kubernetes_operation_duration_seconds = Histogram(
 hamamooz_backup_duration_seconds = Histogram(
     "hamamooz_backup_duration_seconds",
     "Duration of backup work",
+)
+
+hamamooz_backups_in_progress = Gauge(
+    "hamamooz_backups_in_progress",
+    "Number of backups currently in progress",
 )

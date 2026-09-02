@@ -12,6 +12,7 @@ from clusterproject.metrics import hamamooz_backup_jobs_total
 from clusterproject.metrics import hamamooz_kubernetes_operations_total
 from clusterproject.metrics import hamamooz_kubernetes_operation_duration_seconds
 from clusterproject.metrics import hamamooz_backup_duration_seconds
+from clusterproject.metrics import hamamooz_backups_in_progress
 import time
 
 @shared_task(
@@ -27,6 +28,7 @@ def perform_backup(self, backup_id):
 
     start = time.monotonic()
 
+    hamamooz_backups_in_progress.inc()
     backup.status = "running"
     backup.save(update_fields=["status"])
 
@@ -124,7 +126,7 @@ def perform_backup(self, backup_id):
 
         duration = time.monotonic() - start
         hamamooz_backup_duration_seconds.observe(duration)
-        
+
         backup.output_path = str(output_path)
         backup.status = "completed"
         backup.completed_at = datetime.now(timezone.utc)
@@ -136,12 +138,15 @@ def perform_backup(self, backup_id):
         )
 
         hamamooz_backup_jobs_total.labels("app", "create", "success", "completed").inc()
+        hamamooz_backups_in_progress.dec()
+        
     except Exception as exc:
         backup.status = "failed"
         backup.error = str(exc)
         backup.save(update_fields=["status", "error"])
 
         hamamooz_backup_jobs_total.labels("app", "create", "error", "failed").inc()
+        hamamooz_backups_in_progress.dec()
         raise
 
 
